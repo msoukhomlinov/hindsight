@@ -1197,7 +1197,7 @@ ZeroEntropy's `zembed-1` supports Matryoshka dimensions: `2560`, `1280`, `640`, 
 | `HINDSIGHT_API_RERANKER_TYPESAFE_TIMEOUT` | HTTP request timeout for the TypeSafe reranker (seconds). | `60.0` |
 | `HINDSIGHT_API_RERANKER_TYPESAFE_BATCH_SIZE` | Candidates per API call. `1` gives each candidate its own call and the sharpest judgment; higher values share one call (fewer round trips, fewer input tokens) at the cost of per-candidate accuracy. Raise only when ranking quality alone matters — see the note below. | `1` |
 | `HINDSIGHT_API_RERANKER_TYPESAFE_MAX_CONCURRENT` | Maximum in-flight TypeSafe requests. | `24` |
-| `HINDSIGHT_API_RERANKER_TYPESAFE_PRUNE_IRRELEVANT` | Discard candidates TypeSafe judges irrelevant instead of merely ranking them last. Shrinks what recall returns — see the note below. | `false` |
+| `HINDSIGHT_API_RERANKER_TYPESAFE_PRUNE_CANDIDATES` | Prune candidates TypeSafe judges irrelevant instead of merely ranking them last. Shrinks what recall returns — see the note below. | `false` |
 | `HINDSIGHT_API_RERANKER_ALIBABA_API_KEY` | Alibaba Cloud DashScope API key for reranking | - |
 | `HINDSIGHT_API_RERANKER_ALIBABA_MODEL` | DashScope rerank model | `qwen3-rerank` |
 | `HINDSIGHT_API_RERANKER_ALIBABA_TIMEOUT` | HTTP request timeout for the Alibaba Cloud DashScope reranker (seconds). | `60.0` |
@@ -1355,7 +1355,7 @@ export HINDSIGHT_API_RERANKER_SILICONFLOW_MODEL=BAAI/bge-reranker-v2-m3
 export HINDSIGHT_API_RERANKER_PROVIDER=typesafe
 export HINDSIGHT_API_RERANKER_TYPESAFE_API_KEY=your-api-key
 # export HINDSIGHT_API_RERANKER_TYPESAFE_MODEL=jev-latest              # default
-# export HINDSIGHT_API_RERANKER_TYPESAFE_PRUNE_IRRELEVANT=true          # also discard irrelevant candidates
+# export HINDSIGHT_API_RERANKER_TYPESAFE_PRUNE_CANDIDATES=true          # also prune irrelevant candidates
 
 # Alibaba Cloud DashScope - qwen3-rerank via Cohere-compatible /reranks endpoint
 export HINDSIGHT_API_RERANKER_PROVIDER=alibaba
@@ -1407,7 +1407,7 @@ probability of `relevant` becomes the candidate's score.
 
 **Pruning irrelevant candidates.** That one answer carries both the pick and the
 probabilities, so the score and the keep-or-prune verdict come back from the *same*
-question — not a second pass. `HINDSIGHT_API_RERANKER_TYPESAFE_PRUNE_IRRELEVANT=true`
+question — not a second pass. `HINDSIGHT_API_RERANKER_TYPESAFE_PRUNE_CANDIDATES=true`
 simply acts on the verdict, leaving pruned candidates out instead of ranking them last;
 it costs no extra call, token or millisecond. No score threshold is involved — the model
 makes the call. It does meaningfully shrink what recall returns, so it is off by
@@ -1422,7 +1422,7 @@ question the model prunes roughly a third of the evidence that should be kept, w
 candidates into one call, cutting round trips and input tokens. The trade-off is that
 batched candidates share a state and the model's judgment of each degrades as the
 others crowd in — measurably so for the keep/prune verdict. Leave it at `1` when
-`PRUNE_IRRELEVANT` is on; raise it when only the ranking matters.
+`PRUNE_CANDIDATES` is on; raise it when only the ranking matters.
 
 #### Jina MLX (Apple Silicon)
 

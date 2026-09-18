@@ -640,7 +640,7 @@ ENV_RERANKER_TYPESAFE_BASE_URL = "HINDSIGHT_API_RERANKER_TYPESAFE_BASE_URL"
 ENV_RERANKER_TYPESAFE_TIMEOUT = "HINDSIGHT_API_RERANKER_TYPESAFE_TIMEOUT"
 ENV_RERANKER_TYPESAFE_BATCH_SIZE = "HINDSIGHT_API_RERANKER_TYPESAFE_BATCH_SIZE"
 ENV_RERANKER_TYPESAFE_MAX_CONCURRENT = "HINDSIGHT_API_RERANKER_TYPESAFE_MAX_CONCURRENT"
-ENV_RERANKER_TYPESAFE_PRUNE_IRRELEVANT = "HINDSIGHT_API_RERANKER_TYPESAFE_PRUNE_IRRELEVANT"
+ENV_RERANKER_TYPESAFE_PRUNE_CANDIDATES = "HINDSIGHT_API_RERANKER_TYPESAFE_PRUNE_CANDIDATES"
 
 # Alibaba Cloud DashScope configuration (reranker only)
 ENV_RERANKER_ALIBABA_API_KEY = "HINDSIGHT_API_RERANKER_ALIBABA_API_KEY"
@@ -1414,11 +1414,11 @@ DEFAULT_RERANKER_TYPESAFE_BASE_URL = "https://api.typesafe.ai"
 # cheaper and one round trip — but they then share one state, and the model's
 # judgment of each degrades as the others crowd in. Measured on a 200-question
 # LoCoMo set: at 1 candidate per call it keeps 90% of the gold evidence, at 16 only
-# 73%. Batching is therefore a ranking-only economy, unsafe with prune_irrelevant.
+# 73%. Batching is therefore a ranking-only economy, unsafe with prune_candidates.
 DEFAULT_RERANKER_TYPESAFE_BATCH_SIZE = 1
 DEFAULT_RERANKER_TYPESAFE_MAX_CONCURRENT = 24
 # Off by default: dropping changes what recall returns, so it is opt-in.
-DEFAULT_RERANKER_TYPESAFE_PRUNE_IRRELEVANT = False
+DEFAULT_RERANKER_TYPESAFE_PRUNE_CANDIDATES = False
 
 DEFAULT_RERANKER_ALIBABA_MODEL = "qwen3-rerank"
 
@@ -2650,7 +2650,7 @@ class RerankerMemberConfig:
     typesafe_timeout: float
     typesafe_batch_size: int
     typesafe_max_concurrent: int
-    typesafe_prune_irrelevant: bool
+    typesafe_prune_candidates: bool
     # alibaba
     alibaba_api_key: str | None
     alibaba_model: str
@@ -2803,8 +2803,8 @@ def _parse_reranker_members() -> list[RerankerMemberConfig]:
                 typesafe_max_concurrent=_member_int(
                     base, "TYPESAFE_MAX_CONCURRENT", DEFAULT_RERANKER_TYPESAFE_MAX_CONCURRENT
                 ),
-                typesafe_prune_irrelevant=_member_bool(
-                    base, "TYPESAFE_PRUNE_IRRELEVANT", DEFAULT_RERANKER_TYPESAFE_PRUNE_IRRELEVANT
+                typesafe_prune_candidates=_member_bool(
+                    base, "TYPESAFE_PRUNE_CANDIDATES", DEFAULT_RERANKER_TYPESAFE_PRUNE_CANDIDATES
                 ),
                 alibaba_api_key=_member_opt_str(base, "ALIBABA_API_KEY"),
                 alibaba_model=_member_str(base, "ALIBABA_MODEL", DEFAULT_RERANKER_ALIBABA_MODEL),
@@ -3206,7 +3206,7 @@ class HindsightConfig:
     reranker_typesafe_timeout: float
     reranker_typesafe_batch_size: int
     reranker_typesafe_max_concurrent: int
-    reranker_typesafe_prune_irrelevant: bool
+    reranker_typesafe_prune_candidates: bool
     reranker_alibaba_api_key: str | None
     reranker_alibaba_model: str
     reranker_alibaba_timeout: float
@@ -3800,7 +3800,7 @@ class HindsightConfig:
             typesafe_timeout=self.reranker_typesafe_timeout,
             typesafe_batch_size=self.reranker_typesafe_batch_size,
             typesafe_max_concurrent=self.reranker_typesafe_max_concurrent,
-            typesafe_prune_irrelevant=self.reranker_typesafe_prune_irrelevant,
+            typesafe_prune_candidates=self.reranker_typesafe_prune_candidates,
             alibaba_api_key=self.reranker_alibaba_api_key,
             alibaba_model=self.reranker_alibaba_model,
             alibaba_timeout=self.reranker_alibaba_timeout,
@@ -4673,8 +4673,8 @@ class HindsightConfig:
             reranker_typesafe_max_concurrent=int(
                 os.getenv(ENV_RERANKER_TYPESAFE_MAX_CONCURRENT, "").strip() or DEFAULT_RERANKER_TYPESAFE_MAX_CONCURRENT
             ),
-            reranker_typesafe_prune_irrelevant=_parse_boolean_env(
-                ENV_RERANKER_TYPESAFE_PRUNE_IRRELEVANT, DEFAULT_RERANKER_TYPESAFE_PRUNE_IRRELEVANT
+            reranker_typesafe_prune_candidates=_parse_boolean_env(
+                ENV_RERANKER_TYPESAFE_PRUNE_CANDIDATES, DEFAULT_RERANKER_TYPESAFE_PRUNE_CANDIDATES
             ),
             # Alibaba Cloud DashScope reranker
             reranker_alibaba_api_key=os.getenv(ENV_RERANKER_ALIBABA_API_KEY),

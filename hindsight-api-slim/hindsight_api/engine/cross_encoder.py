@@ -37,7 +37,7 @@ from ..config import (
     DEFAULT_RERANKER_TYPESAFE_BATCH_SIZE,
     DEFAULT_RERANKER_TYPESAFE_MAX_CONCURRENT,
     DEFAULT_RERANKER_TYPESAFE_MODEL,
-    DEFAULT_RERANKER_TYPESAFE_PRUNE_IRRELEVANT,
+    DEFAULT_RERANKER_TYPESAFE_PRUNE_CANDIDATES,
     DEFAULT_RERANKER_TYPESAFE_TIMEOUT,
     DEFAULT_RERANKER_ZEROENTROPY_MODEL,
     DEFAULT_ZEROENTROPY_BASE_URL,
@@ -911,7 +911,7 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
 
     Scoring and the keep/prune verdict are the *same* question, not two passes: the
     one answer carries both the pick and the probability of each option, so the
-    probability of "relevant" ranks the candidate while — when ``prune_irrelevant``
+    probability of "relevant" ranks the candidate while — when ``prune_candidates``
     is on — a pick of "irrelevant" scores it 0.0 for the caller to leave out.
     Pruning therefore costs no extra call, no extra token and no extra latency; the
     flag only decides whether we act on a verdict we were already given.
@@ -938,7 +938,7 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
         timeout: float = DEFAULT_RERANKER_TYPESAFE_TIMEOUT,
         max_concurrent: int = DEFAULT_RERANKER_TYPESAFE_MAX_CONCURRENT,
         batch_size: int = DEFAULT_RERANKER_TYPESAFE_BATCH_SIZE,
-        prune_irrelevant: bool = DEFAULT_RERANKER_TYPESAFE_PRUNE_IRRELEVANT,
+        prune_candidates: bool = DEFAULT_RERANKER_TYPESAFE_PRUNE_CANDIDATES,
     ):
         # Tolerate an unset-but-present value ("VAR=" in a compose file, or a config
         # built with every field zeroed) by falling back to the default.
@@ -946,7 +946,7 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
         self.base_url = (base_url or DEFAULT_RERANKER_TYPESAFE_BASE_URL).rstrip("/")
         self.timeout = timeout
         self.batch_size = max(1, batch_size or DEFAULT_RERANKER_TYPESAFE_BATCH_SIZE)
-        self.prunes_candidates = bool(prune_irrelevant)
+        self.prunes_candidates = bool(prune_candidates)
         # CrossLoopSemaphore, not asyncio.Semaphore: one encoder instance is built at
         # startup and reached from every loop in the process (worker threads run their
         # own via asyncio.run), and an asyncio.Semaphore binds to whichever loop first
@@ -967,7 +967,7 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
     async def initialize(self) -> None:
         logger.info(
             f"Reranker: initializing TypeSafe provider at {self.base_url} with model {self.model} "
-            f"(batch_size={self.batch_size}, prune_irrelevant={self.prunes_candidates})"
+            f"(batch_size={self.batch_size}, prune_candidates={self.prunes_candidates})"
         )
 
     async def _score_batch(self, query: str, docs: list[str]) -> list[float]:
@@ -2128,7 +2128,7 @@ def _create_cross_encoder_backend(member: RerankerMemberConfig) -> CrossEncoderM
             timeout=member.typesafe_timeout,
             max_concurrent=member.typesafe_max_concurrent,
             batch_size=member.typesafe_batch_size,
-            prune_irrelevant=member.typesafe_prune_irrelevant,
+            prune_candidates=member.typesafe_prune_candidates,
         )
     elif provider == "rrf":
         return RRFPassthroughCrossEncoder()

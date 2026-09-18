@@ -1,4 +1,4 @@
-"""TypeSafe reranker: question shape, score mapping, and the prune_irrelevant flag.
+"""TypeSafe reranker: question shape, score mapping, and the prune_candidates flag.
 
 TypeSafe answers typed questions rather than exposing a /rerank endpoint, so the
 mapping from (query, doc) pairs onto questions — and from answers back onto scores
@@ -93,12 +93,12 @@ class TestScoring:
     @pytest.mark.asyncio
     async def test_related_keeps_its_probability_and_is_not_dropped(self):
         """ "related" is the middle option — a partial match still ranks, never 0.0."""
-        encoder, _ = _encoder([("related", 0.4)], prune_irrelevant=True)
+        encoder, _ = _encoder([("related", 0.4)], prune_candidates=True)
         assert await encoder._predict([("q", "doc")]) == [0.4]
 
     @pytest.mark.asyncio
     async def test_irrelevant_scores_zero_when_dropping_is_on(self):
-        encoder, _ = _encoder([("irrelevant", 0.02)], prune_irrelevant=True)
+        encoder, _ = _encoder([("irrelevant", 0.02)], prune_candidates=True)
         assert await encoder._predict([("q", "doc")]) == [0.0]
         assert encoder.prunes_candidates is True
 
@@ -164,7 +164,7 @@ class TestFactory:
             reranker_typesafe_base_url="https://api.typesafe.ai",
             reranker_typesafe_batch_size=4,
             reranker_typesafe_max_concurrent=8,
-            reranker_typesafe_prune_irrelevant=True,
+            reranker_typesafe_prune_candidates=True,
         )
         with patch("hindsight_api.config.get_config", return_value=config):
             encoder = create_cross_encoder_from_env()
@@ -183,5 +183,5 @@ class TestFactory:
     def test_defaults_are_jev_and_no_dropping(self):
         config = HindsightConfig.from_env()
         assert config.reranker_typesafe_model == "jev-latest"
-        assert config.reranker_typesafe_prune_irrelevant is False
+        assert config.reranker_typesafe_prune_candidates is False
         assert config.reranker_typesafe_batch_size == 1
