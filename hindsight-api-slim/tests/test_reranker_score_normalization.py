@@ -154,7 +154,7 @@ async def test_boundary_scores_passthrough():
 async def test_zero_scores_survive_an_ordinary_reranker():
     """A low score from a plain cross-encoder means "least bad", never "discard"."""
     ce = _make_cross_encoder([0.5, 0.0, 0.2])
-    ce.drops_irrelevant = False
+    ce.prunes_candidates = False
     results = await CrossEncoderReranker(cross_encoder=ce).rerank("q", _make_candidates(3))
     assert len(results) == 3
 
@@ -163,6 +163,6 @@ async def test_zero_scores_survive_an_ordinary_reranker():
 async def test_zero_scores_are_dropped_when_the_reranker_judges_relevance():
     """A reranker that decides relevance marks a discard with exactly 0.0."""
     ce = _make_cross_encoder([0.5, 0.0, 0.2])
-    ce.drops_irrelevant = True
+    ce.prunes_candidates = True
     results = await CrossEncoderReranker(cross_encoder=ce).rerank("q", _make_candidates(3))
     assert [r.weight for r in results] == [0.5, 0.2]

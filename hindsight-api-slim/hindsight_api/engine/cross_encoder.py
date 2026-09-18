@@ -35,9 +35,9 @@ from ..config import (
     DEFAULT_RERANKER_TEI_MAX_CONCURRENT,
     DEFAULT_RERANKER_TYPESAFE_BASE_URL,
     DEFAULT_RERANKER_TYPESAFE_BATCH_SIZE,
-    DEFAULT_RERANKER_TYPESAFE_DROP_IRRELEVANT,
     DEFAULT_RERANKER_TYPESAFE_MAX_CONCURRENT,
     DEFAULT_RERANKER_TYPESAFE_MODEL,
+    DEFAULT_RERANKER_TYPESAFE_PRUNE_IRRELEVANT,
     DEFAULT_RERANKER_TYPESAFE_TIMEOUT,
     DEFAULT_RERANKER_ZEROENTROPY_MODEL,
     DEFAULT_ZEROENTROPY_BASE_URL,
@@ -100,12 +100,12 @@ class CrossEncoderModel(ABC):
     # (#4134).
     retry_policy: RetryPolicy | None = None
 
-    # Whether this backend decides for itself that a candidate is not relevant at
-    # all, signalling it with a score of exactly 0.0 for the caller to discard.
-    # Ordinary rerankers only order candidates — they have no calibrated notion of
-    # "not relevant", so a low score still means "least bad of these" and must be
-    # kept. Leave False unless the score is a real decision.
-    drops_irrelevant: bool = False
+    # Whether this backend prunes candidates it judges irrelevant, marking each with
+    # a score of exactly 0.0 for the caller to leave out. Ordinary rerankers only
+    # order candidates — they have no calibrated notion of "not relevant", so their
+    # lowest score still means "least bad of these" and must be kept. Leave False
+    # unless the score is a real decision.
+    prunes_candidates: bool = False
 
     async def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
         """
@@ -907,18 +907,23 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
 
     Not a Cohere-compatible /rerank endpoint: TypeSafe evaluates typed *questions*
     against a *state* and answers with a pick plus a probability per option. A
-    (query, doc) pair therefore maps to state=doc and one three-way Choice; the
-    probability of "relevant" ranks the candidate, and — when ``drop_irrelevant``
-    is on — a pick of "irrelevant" scores it 0.0 so the caller discards it.
+    (query, doc) pair therefore maps to state=doc and one three-way Choice.
 
-    The three-way split is what makes discarding safe. Asked a plain
-    relevant-or-not binary the model throws away about a third of the evidence it
-    should keep; given "related" as a home for partial matches it keeps ~87% of
-    the gold evidence while still discarding ~90% of the candidate pool.
+    Scoring and the keep/prune verdict are the *same* question, not two passes: the
+    one answer carries both the pick and the probability of each option, so the
+    probability of "relevant" ranks the candidate while — when ``prune_irrelevant``
+    is on — a pick of "irrelevant" scores it 0.0 for the caller to leave out.
+    Pruning therefore costs no extra call, no extra token and no extra latency; the
+    flag only decides whether we act on a verdict we were already given.
+
+    The three-way split is what makes pruning safe. Asked a plain relevant-or-not
+    binary the model throws away about a third of the evidence it should keep;
+    given "related" as a home for partial matches it keeps ~87% of the gold
+    evidence while still pruning ~90% of the candidate pool.
     """
 
     SYSTEMONE_PATH = "/v1/systemone"
-    DROP = "irrelevant"
+    PRUNE = "irrelevant"
     CRITERIA = {
         "relevant": "The candidate states, or directly supports, an answer to the question",
         "related": "The candidate is about the same people, topic or period, and could help answer it in part",
@@ -933,7 +938,7 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
         timeout: float = DEFAULT_RERANKER_TYPESAFE_TIMEOUT,
         max_concurrent: int = DEFAULT_RERANKER_TYPESAFE_MAX_CONCURRENT,
         batch_size: int = DEFAULT_RERANKER_TYPESAFE_BATCH_SIZE,
-        drop_irrelevant: bool = DEFAULT_RERANKER_TYPESAFE_DROP_IRRELEVANT,
+        prune_irrelevant: bool = DEFAULT_RERANKER_TYPESAFE_PRUNE_IRRELEVANT,
     ):
         # Tolerate an unset-but-present value ("VAR=" in a compose file, or a config
         # built with every field zeroed) by falling back to the default.
@@ -941,7 +946,7 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
         self.base_url = (base_url or DEFAULT_RERANKER_TYPESAFE_BASE_URL).rstrip("/")
         self.timeout = timeout
         self.batch_size = max(1, batch_size or DEFAULT_RERANKER_TYPESAFE_BATCH_SIZE)
-        self.drops_irrelevant = bool(drop_irrelevant)
+        self.prunes_candidates = bool(prune_irrelevant)
         # CrossLoopSemaphore, not asyncio.Semaphore: one encoder instance is built at
         # startup and reached from every loop in the process (worker threads run their
         # own via asyncio.run), and an asyncio.Semaphore binds to whichever loop first
@@ -962,17 +967,19 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
     async def initialize(self) -> None:
         logger.info(
             f"Reranker: initializing TypeSafe provider at {self.base_url} with model {self.model} "
-            f"(batch_size={self.batch_size}, drop_irrelevant={self.drops_irrelevant})"
+            f"(batch_size={self.batch_size}, prune_irrelevant={self.prunes_candidates})"
         )
 
     async def _score_batch(self, query: str, docs: list[str]) -> list[float]:
-        """Score one chunk of candidates, returning 0.0 for any the model discards.
+        """Score one chunk of candidates, returning 0.0 for any the model prunes.
+
+        One question per candidate answers both things at once — the rank and the
+        verdict — so a chunk is a single request either way.
 
         With batch_size 1 the candidate is the whole state, which is what the
-        decision needs. Above that the chunk shares one state and the model answers
-        one question per candidate: one round trip and ~1/batch_size the input
-        tokens, but its judgment of each candidate degrades as the others crowd in,
-        so batching is a ranking-only economy.
+        verdict needs. Above that the chunk shares one state: one round trip and
+        ~1/batch_size the input tokens, but the model's judgment of each candidate
+        degrades as the others crowd in, so batching is a ranking-only economy.
         """
         if len(docs) == 1:
             state: str = docs[0]
@@ -999,7 +1006,7 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
         answers = [result["answers"][f"d{i}"] for i in range(len(docs))]
         return [
             0.0
-            if (self.drops_irrelevant and answer["choice"] == self.DROP)
+            if (self.prunes_candidates and answer["choice"] == self.PRUNE)
             else float(answer["probabilities"]["relevant"])
             for answer in answers
         ]
@@ -2121,7 +2128,7 @@ def _create_cross_encoder_backend(member: RerankerMemberConfig) -> CrossEncoderM
             timeout=member.typesafe_timeout,
             max_concurrent=member.typesafe_max_concurrent,
             batch_size=member.typesafe_batch_size,
-            drop_irrelevant=member.typesafe_drop_irrelevant,
+            prune_irrelevant=member.typesafe_prune_irrelevant,
         )
     elif provider == "rrf":
         return RRFPassthroughCrossEncoder()

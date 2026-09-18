@@ -432,15 +432,15 @@ class CrossEncoderReranker:
         scored_results.sort(key=lambda x: x.weight, reverse=True)
 
         # Some rerankers judge relevance rather than only ordering it, and mark a
-        # candidate they would discard with a score of 0.0. Honour that verdict:
-        # the alternative is carrying junk down to the token budget, which cuts by
-        # rank and so keeps whatever is left when nothing is relevant. No threshold
-        # here on purpose — the model decides, we do not tune a number.
+        # candidate they would prune with a score of 0.0. Honour that verdict: the
+        # alternative is carrying junk down to the token budget, which cuts by rank
+        # and so keeps whatever is left when nothing is relevant. No threshold here
+        # on purpose — the model decides, we do not tune a number.
         # getattr for the same reason as ensure_initialized: tests inject duck-typed
         # cross encoders that do not subclass CrossEncoderModel. Compared against True
         # rather than used for truthiness, because an AsyncMock answers every attribute
-        # with a truthy Mock — which would silently start discarding results.
-        if getattr(self.cross_encoder, "drops_irrelevant", False) is True:
+        # with a truthy Mock — which would silently start pruning results.
+        if getattr(self.cross_encoder, "prunes_candidates", False) is True:
             kept = [result for result in scored_results if result.weight > 0.0]
             logger.info(f"Reranking: reranker kept {len(kept)}/{len(scored_results)} candidates as relevant")
             return kept
