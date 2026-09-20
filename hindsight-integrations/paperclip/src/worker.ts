@@ -69,7 +69,14 @@ interface SecretRef {
   secretId: string;
 }
 
-/** Paperclip secret IDs are UUIDs; anything else is the API key itself. */
+/**
+ * Paperclip secret IDs are always UUIDs — the host has no name-based lookup.
+ * `companySecretBindings`/`companySecrets` are keyed on `id` (UUID PK) and
+ * `parseSecretRefBindingObject` (server/src/services/json-schema-secret-refs.ts)
+ * rejects any `secretId` that isn't UUID-shaped, so a "named" secret ref was
+ * never resolvable here even before this patch. Anything non-UUID is the
+ * literal API key.
+ */
 const SECRET_ID_PATTERN =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
