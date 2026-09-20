@@ -57,12 +57,31 @@ async function getConfig(ctx: {
   return (await ctx.config.get()) as unknown as PluginConfig;
 }
 
+/**
+ * The secret reference shape Paperclip's plugin host expects. The SDK's own
+ * `ctx.secrets.resolve()` signature still says "bare string", but the host
+ * rejects a string outright ("Use { type: \"secret_ref\", secretId, version? }"),
+ * so the ref has to be built here.
+ */
+interface SecretRef {
+  type: "secret_ref";
+  secretId: string;
+}
+
+/** Paperclip secret IDs are UUIDs; anything else is the API key itself. */
+const SECRET_ID_PATTERN =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
 async function resolveApiKey(
-  ctx: { secrets: { resolve(ref: string): Promise<string | null> } },
+  ctx: { secrets: { resolve(ref: string | SecretRef): Promise<string | null> } },
   config: PluginConfig
 ): Promise<string | undefined> {
-  if (!config.hindsightApiKeyRef) return undefined;
-  const resolved = await ctx.secrets.resolve(config.hindsightApiKeyRef);
+  const ref = config.hindsightApiKeyRef;
+  if (!ref) return undefined;
+  // Self-hosted deployments commonly configure a literal bearer token rather
+  // than binding a Paperclip secret. Only take the resolve path for a real ref.
+  if (!SECRET_ID_PATTERN.test(ref)) return ref;
+  const resolved = await ctx.secrets.resolve({ type: "secret_ref", secretId: ref });
   return resolved ?? undefined;
 }
 
