@@ -239,6 +239,27 @@ describe("agent.run.started", () => {
     expect(state).toContain("TypeScript");
   });
 
+  it("caps the recall query — Hindsight 400s on queries over 500 tokens", async () => {
+    const harness = buildHarness();
+    await setupPlugin(harness);
+    const issue = await seedIssue(harness, {
+      companyId: "co-1",
+      title: "Refactor auth module",
+      description: "x".repeat(5000),
+    });
+
+    await harness.emit(
+      "agent.run.started",
+      { agentId: "ag-1", runId: "run-1", issueId: issue.id },
+      { companyId: "co-1" }
+    );
+
+    const recallCall = fetchMock.mock.calls.find(([url]: [string]) => url.includes("recall"));
+    const recallBody = JSON.parse(recallCall?.[1]?.body as string) as { query: string };
+    expect(recallBody.query.length).toBe(1200);
+    expect(recallBody.query.startsWith("Refactor auth module")).toBe(true);
+  });
+
   it("uses user-scoped bank ID when bankGranularity includes 'user'", async () => {
     const harness = buildHarness({
       ...DEFAULT_CONFIG,

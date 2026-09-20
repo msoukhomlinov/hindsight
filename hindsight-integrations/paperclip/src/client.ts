@@ -13,6 +13,12 @@ export interface RecallResponse {
   results: Memory[];
 }
 
+/**
+ * Hindsight rejects recall queries longer than 500 tokens with HTTP 400.
+ * Prose runs ~4 chars/token, so 1200 chars sits comfortably inside that.
+ */
+const MAX_QUERY_CHARS = 1200;
+
 export class HindsightClient {
   private readonly baseUrl: string;
   private readonly token: string | undefined;
@@ -56,7 +62,9 @@ export class HindsightClient {
   async recall(bankId: string, query: string, budget = "mid"): Promise<RecallResponse> {
     const path = `/v1/default/banks/${encodeURIComponent(bankId)}/memories/recall`;
     return this.request<RecallResponse>("POST", path, {
-      query,
+      // Capped here rather than at the call sites so every caller — the
+      // run-start recall and the hindsight_recall tool — is covered.
+      query: query.slice(0, MAX_QUERY_CHARS),
       budget,
       max_tokens: 1024,
     });
