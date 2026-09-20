@@ -81,6 +81,13 @@ const manifest: PaperclipPluginManifestV1 = {
           "Restrict Hindsight recall/retain to these agent IDs only. Leave empty to enable for all agents (default).",
         items: { type: "string" },
       },
+      maxQueryChars: {
+        type: "number",
+        title: "Max Recall Query Length (chars)",
+        description:
+          "Recall queries longer than this are truncated before being sent to Hindsight. Hindsight Cloud rejects queries over ~500 tokens (roughly 4 chars/token); self-hosted instances that raise or disable recall_max_query_tokens can set this higher.",
+        default: 1200,
+      },
     },
   },
   tools: [

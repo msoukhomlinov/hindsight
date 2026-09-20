@@ -31,6 +31,7 @@ interface PluginConfig {
   recallBudget?: "low" | "mid" | "high";
   autoRetain?: boolean;
   enabledAgentIds?: string[];
+  maxQueryChars?: number;
 }
 
 interface RunStartedPayload {
@@ -140,7 +141,7 @@ const plugin = definePlugin({
 
       try {
         const apiKey = await resolveApiKey(ctx, config);
-        const client = new HindsightClient(config.hindsightApiUrl, apiKey);
+        const client = new HindsightClient(config.hindsightApiUrl, apiKey, config.maxQueryChars);
         const bankId = deriveBankId({ companyId, agentId, userId }, config);
 
         const response = await client.recall(bankId, query, config.recallBudget ?? "mid");
@@ -240,7 +241,7 @@ const plugin = definePlugin({
 
       try {
         const apiKey = await resolveApiKey(ctx, config);
-        const client = new HindsightClient(config.hindsightApiUrl, apiKey);
+        const client = new HindsightClient(config.hindsightApiUrl, apiKey, config.maxQueryChars);
         const bankId = deriveBankId({ companyId, agentId: bankAgentId, userId }, config);
         await client.retain(bankId, body, commentId, {
           agentId: bankAgentId,
@@ -325,7 +326,7 @@ const plugin = definePlugin({
         // Live recall fallback
         try {
           const apiKey = await resolveApiKey(ctx, config);
-          const client = new HindsightClient(config.hindsightApiUrl, apiKey);
+          const client = new HindsightClient(config.hindsightApiUrl, apiKey, config.maxQueryChars);
           const response = await client.recall(bankId, query, config.recallBudget ?? "mid");
           const memories = formatMemories(response.results);
           return { content: memories || "No relevant memories found." };
@@ -377,7 +378,7 @@ const plugin = definePlugin({
 
         try {
           const apiKey = await resolveApiKey(ctx, config);
-          const client = new HindsightClient(config.hindsightApiUrl, apiKey);
+          const client = new HindsightClient(config.hindsightApiUrl, apiKey, config.maxQueryChars);
           await client.retain(bankId, content, undefined, {
             agentId: runCtx.agentId,
             companyId: runCtx.companyId,

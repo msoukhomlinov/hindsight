@@ -14,10 +14,13 @@ export interface RecallResponse {
 }
 
 /**
- * Hindsight rejects recall queries longer than 500 tokens with HTTP 400.
- * Prose runs ~4 chars/token, so 1200 chars sits comfortably inside that.
+ * Hindsight Cloud rejects recall queries longer than 500 tokens with HTTP 400.
+ * Prose runs ~4 chars/token, so 1200 chars sits comfortably inside that on the
+ * default deployment. This is a char-count approximation, not a real token
+ * count — self-hosted instances with a different (or disabled) query token
+ * limit can override it via the plugin's maxQueryChars config.
  */
-const MAX_QUERY_CHARS = 1200;
+const DEFAULT_MAX_QUERY_CHARS = 1200;
 
 /**
  * Recall runs a reranker server-side, which under concurrent load can take
@@ -29,12 +32,15 @@ const REQUEST_TIMEOUT_MS = 30_000;
 export class HindsightClient {
   private readonly baseUrl: string;
   private readonly token: string | undefined;
+  private readonly maxQueryChars: number;
 
-  constructor(baseUrl: string, token?: string) {
+  constructor(baseUrl: string, token?: string, maxQueryChars?: number) {
     const url = baseUrl.trim();
     if (!url) throw new Error("hindsightApiUrl is required");
     this.baseUrl = url.replace(/\/$/, "");
     this.token = token;
+    this.maxQueryChars =
+      maxQueryChars && maxQueryChars > 0 ? maxQueryChars : DEFAULT_MAX_QUERY_CHARS;
   }
 
   private headers(): Record<string, string> {
@@ -71,7 +77,7 @@ export class HindsightClient {
     return this.request<RecallResponse>("POST", path, {
       // Capped here rather than at the call sites so every caller — the
       // run-start recall and the hindsight_recall tool — is covered.
-      query: query.slice(0, MAX_QUERY_CHARS),
+      query: query.slice(0, this.maxQueryChars),
       budget,
       max_tokens: 1024,
     });
