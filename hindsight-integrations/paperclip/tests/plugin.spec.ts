@@ -837,4 +837,17 @@ describe("hindsightApiKeyRef", () => {
     });
     expect(resolve.mock.calls[0]?.[0]).toEqual({ type: "secret_ref", secretId });
   });
+
+  it("falls back to a UUID-shaped value as a literal key when no secret is bound", async () => {
+    const literalUuidKey = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
+    const harness = buildHarness({ ...DEFAULT_CONFIG, hindsightApiKeyRef: literalUuidKey });
+    const resolve = vi
+      .spyOn(harness.ctx.secrets, "resolve")
+      .mockRejectedValue(new Error("Secret is not bound to plugin"));
+
+    expect(await recallOnce(harness)).toMatchObject({
+      Authorization: `Bearer ${literalUuidKey}`,
+    });
+    expect(resolve).toHaveBeenCalledWith({ type: "secret_ref", secretId: literalUuidKey });
+  });
 });

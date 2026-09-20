@@ -89,8 +89,16 @@ async function resolveApiKey(
   // Self-hosted deployments commonly configure a literal bearer token rather
   // than binding a Paperclip secret. Only take the resolve path for a real ref.
   if (!SECRET_ID_PATTERN.test(ref)) return ref;
-  const resolved = await ctx.secrets.resolve({ type: "secret_ref", secretId: ref });
-  return resolved ?? undefined;
+  // A self-hosted API key can itself be UUID-shaped, so a UUID here isn't
+  // proof it's a bound Paperclip secret. Try resolving it as one; if the host
+  // has no binding for it (or resolution fails for any other reason), treat
+  // it as the literal key instead of silently dropping the auth header.
+  try {
+    const resolved = await ctx.secrets.resolve({ type: "secret_ref", secretId: ref });
+    return resolved ?? ref;
+  } catch {
+    return ref;
+  }
 }
 
 function isAgentEnabled(config: PluginConfig, agentId: string | undefined | null): boolean {
