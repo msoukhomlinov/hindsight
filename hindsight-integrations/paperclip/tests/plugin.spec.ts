@@ -239,6 +239,47 @@ describe("agent.run.started", () => {
     expect(state).toContain("TypeScript");
   });
 
+  it("caps the recall query — Hindsight 400s on queries over 500 tokens", async () => {
+    const harness = buildHarness();
+    await setupPlugin(harness);
+    const issue = await seedIssue(harness, {
+      companyId: "co-1",
+      title: "Refactor auth module",
+      description: "x".repeat(5000),
+    });
+
+    await harness.emit(
+      "agent.run.started",
+      { agentId: "ag-1", runId: "run-1", issueId: issue.id },
+      { companyId: "co-1" }
+    );
+
+    const recallCall = fetchMock.mock.calls.find(([url]: [string]) => url.includes("recall"));
+    const recallBody = JSON.parse(recallCall?.[1]?.body as string) as { query: string };
+    expect(recallBody.query.length).toBe(1200);
+    expect(recallBody.query.startsWith("Refactor auth module")).toBe(true);
+  });
+
+  it("honors a configured maxQueryChars for self-hosted instances with a raised token limit", async () => {
+    const harness = buildHarness({ ...DEFAULT_CONFIG, maxQueryChars: 4000 });
+    await setupPlugin(harness);
+    const issue = await seedIssue(harness, {
+      companyId: "co-1",
+      title: "Refactor auth module",
+      description: "x".repeat(5000),
+    });
+
+    await harness.emit(
+      "agent.run.started",
+      { agentId: "ag-1", runId: "run-1", issueId: issue.id },
+      { companyId: "co-1" }
+    );
+
+    const recallCall = fetchMock.mock.calls.find(([url]: [string]) => url.includes("recall"));
+    const recallBody = JSON.parse(recallCall?.[1]?.body as string) as { query: string };
+    expect(recallBody.query.length).toBe(4000);
+  });
+
   it("uses user-scoped bank ID when bankGranularity includes 'user'", async () => {
     const harness = buildHarness({
       ...DEFAULT_CONFIG,
@@ -743,5 +784,70 @@ describe("enabledAgentIds", () => {
 
     const retainCalls = fetchMock.mock.calls.filter(([url]: [string]) => /memories$/.test(url));
     expect(retainCalls.length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// API key resolution
+// ---------------------------------------------------------------------------
+
+describe("hindsightApiKeyRef", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = mockFetch([{ url: /recall/, body: { results: [] } }]);
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function recallOnce(harness: ReturnType<typeof buildHarness>) {
+    await setupPlugin(harness);
+    const issue = await seedIssue(harness, { companyId: "co-1", title: "Refactor auth module" });
+    await harness.emit(
+      "agent.run.started",
+      { agentId: "ag-1", runId: "run-1", issueId: issue.id },
+      { companyId: "co-1" }
+    );
+    const call = fetchMock.mock.calls.find(([url]: [string]) => url.includes("recall"));
+    return (call?.[1]?.headers ?? {}) as Record<string, string>;
+  }
+
+  it("uses a non-UUID key directly as the bearer token", async () => {
+    const harness = buildHarness({ ...DEFAULT_CONFIG, hindsightApiKeyRef: "hs_live_literal" });
+    const resolve = vi.spyOn(harness.ctx.secrets, "resolve");
+
+    expect(await recallOnce(harness)).toMatchObject({
+      Authorization: "Bearer hs_live_literal",
+    });
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it("resolves a UUID ref through the host using the secret_ref shape", async () => {
+    const secretId = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
+    const harness = buildHarness({ ...DEFAULT_CONFIG, hindsightApiKeyRef: secretId });
+    const resolve = vi
+      .spyOn(harness.ctx.secrets, "resolve")
+      .mockResolvedValue("hs_from_secret_store");
+
+    expect(await recallOnce(harness)).toMatchObject({
+      Authorization: "Bearer hs_from_secret_store",
+    });
+    expect(resolve.mock.calls[0]?.[0]).toEqual({ type: "secret_ref", secretId });
+  });
+
+  it("falls back to a UUID-shaped value as a literal key when no secret is bound", async () => {
+    const literalUuidKey = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
+    const harness = buildHarness({ ...DEFAULT_CONFIG, hindsightApiKeyRef: literalUuidKey });
+    const resolve = vi
+      .spyOn(harness.ctx.secrets, "resolve")
+      .mockRejectedValue(new Error("Secret is not bound to plugin"));
+
+    expect(await recallOnce(harness)).toMatchObject({
+      Authorization: `Bearer ${literalUuidKey}`,
+    });
+    expect(resolve).toHaveBeenCalledWith({ type: "secret_ref", secretId: literalUuidKey });
   });
 });

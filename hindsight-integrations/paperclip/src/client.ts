@@ -13,15 +13,34 @@ export interface RecallResponse {
   results: Memory[];
 }
 
+/**
+ * Hindsight Cloud rejects recall queries longer than 500 tokens with HTTP 400.
+ * Prose runs ~4 chars/token, so 1200 chars sits comfortably inside that on the
+ * default deployment. This is a char-count approximation, not a real token
+ * count — self-hosted instances with a different (or disabled) query token
+ * limit can override it via the plugin's maxQueryChars config.
+ */
+const DEFAULT_MAX_QUERY_CHARS = 1200;
+
+/**
+ * Recall runs a reranker server-side, which under concurrent load can take
+ * well over 15s end-to-end. Abort too early and the real response (including
+ * genuine errors) is replaced by a bare AbortError.
+ */
+const REQUEST_TIMEOUT_MS = 30_000;
+
 export class HindsightClient {
   private readonly baseUrl: string;
   private readonly token: string | undefined;
+  private readonly maxQueryChars: number;
 
-  constructor(baseUrl: string, token?: string) {
+  constructor(baseUrl: string, token?: string, maxQueryChars?: number) {
     const url = baseUrl.trim();
     if (!url) throw new Error("hindsightApiUrl is required");
     this.baseUrl = url.replace(/\/$/, "");
     this.token = token;
+    this.maxQueryChars =
+      maxQueryChars && maxQueryChars > 0 ? maxQueryChars : DEFAULT_MAX_QUERY_CHARS;
   }
 
   private headers(): Record<string, string> {
@@ -32,7 +51,7 @@ export class HindsightClient {
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15_000);
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
     try {
       const resp = await fetch(`${this.baseUrl}${path}`, {
@@ -56,7 +75,9 @@ export class HindsightClient {
   async recall(bankId: string, query: string, budget = "mid"): Promise<RecallResponse> {
     const path = `/v1/default/banks/${encodeURIComponent(bankId)}/memories/recall`;
     return this.request<RecallResponse>("POST", path, {
-      query,
+      // Capped here rather than at the call sites so every caller — the
+      // run-start recall and the hindsight_recall tool — is covered.
+      query: query.slice(0, this.maxQueryChars),
       budget,
       max_tokens: 1024,
     });

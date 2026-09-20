@@ -31,6 +31,7 @@ interface PluginConfig {
   recallBudget?: "low" | "mid" | "high";
   autoRetain?: boolean;
   enabledAgentIds?: string[];
+  maxQueryChars?: number;
 }
 
 interface RunStartedPayload {
@@ -57,13 +58,47 @@ async function getConfig(ctx: {
   return (await ctx.config.get()) as unknown as PluginConfig;
 }
 
+/**
+ * The secret reference shape Paperclip's plugin host expects. The SDK's own
+ * `ctx.secrets.resolve()` signature still says "bare string", but the host
+ * rejects a string outright ("Use { type: \"secret_ref\", secretId, version? }"),
+ * so the ref has to be built here.
+ */
+interface SecretRef {
+  type: "secret_ref";
+  secretId: string;
+}
+
+/**
+ * Paperclip secret IDs are always UUIDs — the host has no name-based lookup.
+ * `companySecretBindings`/`companySecrets` are keyed on `id` (UUID PK) and
+ * `parseSecretRefBindingObject` (server/src/services/json-schema-secret-refs.ts)
+ * rejects any `secretId` that isn't UUID-shaped, so a "named" secret ref was
+ * never resolvable here even before this patch. Anything non-UUID is the
+ * literal API key.
+ */
+const SECRET_ID_PATTERN =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
 async function resolveApiKey(
-  ctx: { secrets: { resolve(ref: string): Promise<string | null> } },
+  ctx: { secrets: { resolve(ref: string | SecretRef): Promise<string | null> } },
   config: PluginConfig
 ): Promise<string | undefined> {
-  if (!config.hindsightApiKeyRef) return undefined;
-  const resolved = await ctx.secrets.resolve(config.hindsightApiKeyRef);
-  return resolved ?? undefined;
+  const ref = config.hindsightApiKeyRef;
+  if (!ref) return undefined;
+  // Self-hosted deployments commonly configure a literal bearer token rather
+  // than binding a Paperclip secret. Only take the resolve path for a real ref.
+  if (!SECRET_ID_PATTERN.test(ref)) return ref;
+  // A self-hosted API key can itself be UUID-shaped, so a UUID here isn't
+  // proof it's a bound Paperclip secret. Try resolving it as one; if the host
+  // has no binding for it (or resolution fails for any other reason), treat
+  // it as the literal key instead of silently dropping the auth header.
+  try {
+    const resolved = await ctx.secrets.resolve({ type: "secret_ref", secretId: ref });
+    return resolved ?? ref;
+  } catch {
+    return ref;
+  }
 }
 
 function isAgentEnabled(config: PluginConfig, agentId: string | undefined | null): boolean {
@@ -121,7 +156,7 @@ const plugin = definePlugin({
 
       try {
         const apiKey = await resolveApiKey(ctx, config);
-        const client = new HindsightClient(config.hindsightApiUrl, apiKey);
+        const client = new HindsightClient(config.hindsightApiUrl, apiKey, config.maxQueryChars);
         const bankId = deriveBankId({ companyId, agentId, userId }, config);
 
         const response = await client.recall(bankId, query, config.recallBudget ?? "mid");
@@ -221,7 +256,7 @@ const plugin = definePlugin({
 
       try {
         const apiKey = await resolveApiKey(ctx, config);
-        const client = new HindsightClient(config.hindsightApiUrl, apiKey);
+        const client = new HindsightClient(config.hindsightApiUrl, apiKey, config.maxQueryChars);
         const bankId = deriveBankId({ companyId, agentId: bankAgentId, userId }, config);
         await client.retain(bankId, body, commentId, {
           agentId: bankAgentId,
@@ -306,7 +341,7 @@ const plugin = definePlugin({
         // Live recall fallback
         try {
           const apiKey = await resolveApiKey(ctx, config);
-          const client = new HindsightClient(config.hindsightApiUrl, apiKey);
+          const client = new HindsightClient(config.hindsightApiUrl, apiKey, config.maxQueryChars);
           const response = await client.recall(bankId, query, config.recallBudget ?? "mid");
           const memories = formatMemories(response.results);
           return { content: memories || "No relevant memories found." };
@@ -358,7 +393,7 @@ const plugin = definePlugin({
 
         try {
           const apiKey = await resolveApiKey(ctx, config);
-          const client = new HindsightClient(config.hindsightApiUrl, apiKey);
+          const client = new HindsightClient(config.hindsightApiUrl, apiKey, config.maxQueryChars);
           await client.retain(bankId, content, undefined, {
             agentId: runCtx.agentId,
             companyId: runCtx.companyId,
