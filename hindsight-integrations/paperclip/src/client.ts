@@ -19,6 +19,13 @@ export interface RecallResponse {
  */
 const MAX_QUERY_CHARS = 1200;
 
+/**
+ * Recall runs a reranker server-side, which under concurrent load can take
+ * well over 15s end-to-end. Abort too early and the real response (including
+ * genuine errors) is replaced by a bare AbortError.
+ */
+const REQUEST_TIMEOUT_MS = 30_000;
+
 export class HindsightClient {
   private readonly baseUrl: string;
   private readonly token: string | undefined;
@@ -38,7 +45,7 @@ export class HindsightClient {
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15_000);
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
     try {
       const resp = await fetch(`${this.baseUrl}${path}`, {
